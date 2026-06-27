@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VENOM — OSINT Synthesis Dashboard</title>
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- React and Babel -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        :root {
+            --bg: #070a13;
+            --bg-grid: rgba(16, 185, 129, 0.02);
+            --card-bg: rgba(17, 24, 39, 0.7);
+            --border: rgba(255, 255, 255, 0.08);
+            --border-glow: rgba(16, 185, 129, 0.25);
+            --primary: #10b981;
+            --primary-rgb: 16, 185, 129;
+            --accent: #06b6d4;
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+            --error: #ef4444;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg);
+            background-image: 
+                radial-gradient(circle at 10% 20%, rgba(16, 185, 129, 0.05) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(6, 118, 212, 0.05) 0%, transparent 40%),
+                linear-gradient(var(--bg-grid) 1px, transparent 1px),
+                linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
+            background-size: 100% 100%, 100% 100%, 40px 40px, 40px 40px;
+            color: var(--text-main);
+            min-height: 100vh;
+            overflow-x: hidden;
+            line-height: 1.5;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.5rem 2.5rem;
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: rgba(7, 10, 19, 0.8);
+        }
+
+        .logo-container {
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+        }
+
+        .logo-text {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.8rem;
+            font-weight: 700;
+            letter-spacing: -0.05em;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 0 0 30px rgba(16, 185, 129, 0.3);
+        }
+
+        .sys-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.85rem;
+            background: rgba(16, 185, 129, 0.1);
+            padding: 0.4rem 0.8rem;
+            border-radius: 9999px;
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        .sys-status .dot {
+            width: 8px;
+            height: 8px;
+            background-color: var(--primary);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--primary);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.9); opacity: 0.6; }
+            50% { transform: scale(1.2); opacity: 1; }
+            100% { transform: scale(0.9); opacity: 0.6; }
+        }
+
+        main {
+            max-width: 1400px;
+            margin: 2.5rem auto;
+            padding: 0 2rem;
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            gap: 2.5rem;
+        }
+
+        @media (max-width: 1024px) {
+            main {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Glassmorphic Cards */
+        .glass-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 1.8rem;
+            backdrop-filter: blur(16px);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+        }
+
+        .glass-card:hover {
+            border-color: var(--border-glow);
+            box-shadow: 0 12px 40px 0 rgba(16, 185, 129, 0.05);
+        }
+
+        h2 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.25rem;
+            margin-bottom: 1.5rem;
+            color: var(--text-main);
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0.6rem;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+
+        /* Forms */
+        .form-group {
+            margin-bottom: 1.2rem;
+        }
+
+        label {
+            display: block;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+        }
+
+        .input-text, select {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            color: var(--text-main);
+            font-size: 0.95rem;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        select option {
+            background-color: #111827;
+            color: var(--text-main);
+        }
+
+        .input-text:focus, select:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.15);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .btn-primary {
+            width: 100%;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+            border: none;
+            border-radius: 8px;
+            padding: 0.85rem 1.5rem;
+            color: #0b0f19;
+            font-weight: 700;
+            font-family: 'Outfit', sans-serif;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.6rem;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(16, 185, 129, 0.2);
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
+            filter: brightness(1.1);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Terminal Console */
+        .console-box {
+            background: #04060b;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.2rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+            height: 250px;
+            overflow-y: auto;
+            color: #a7f3d0;
+            margin-top: 1.5rem;
+        }
+
+        .console-line {
+            margin-bottom: 0.4rem;
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .console-line .ts {
+            color: #06b6d4;
+        }
+
+        /* Progress Bar */
+        .progress-container {
+            margin-top: 1.5rem;
+        }
+
+        .progress-bar-bg {
+            background: rgba(255, 255, 255, 0.05);
+            height: 6px;
+            border-radius: 999px;
+            overflow: hidden;
+        }
+
+        .progress-bar-fill {
+            background: linear-gradient(90deg, var(--primary), var(--accent));
+            height: 100%;
+            transition: width 0.4s ease;
+            border-radius: 999px;
+        }
+
+        /* Tabs & Visualization */
+        .tabs {
+            display: flex;
+            gap: 0.8rem;
+            margin-bottom: 2rem;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0.8rem;
+            overflow-x: auto;
+        }
+
+        .tab-btn {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            padding: 0.5rem 1.2rem;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+
+        .tab-btn:hover {
+            color: var(--text-main);
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .tab-btn.active {
+            color: var(--primary);
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+            text-align: left;
+        }
+
+        .data-table th {
+            padding: 0.8rem 1rem;
+            color: var(--text-muted);
+            font-weight: 600;
+            border-bottom: 2px solid var(--border);
+            background: rgba(255, 255, 255, 0.01);
+        }
+
+        .data-table td {
+            padding: 0.8rem 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .data-table tr:hover td {
+            background: rgba(255, 255, 255, 0.01);
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 0.2rem 0.6rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .badge-red { background: rgba(239, 68, 68, 0.15); color: #f87171; }
+        .badge-green { background: rgba(16, 185, 129, 0.15); color: #34d399; }
+        .badge-yellow { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+        .badge-blue { background: rgba(59, 130, 246, 0.15); color: #60a5fa; }
+
+        .flex-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .stat-card {
+            flex: 1;
+            min-width: 180px;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.2rem;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--primary);
+            font-family: 'Outfit', sans-serif;
+            margin-top: 0.2rem;
+        }
+
+        .social-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+
+        .social-item {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+        }
+
+        .social-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            background: rgba(16, 185, 129, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--primary);
+        }
+
+        pre {
+            background: #04060b;
+            padding: 1rem;
+            border-radius: 8px;
+            overflow-x: auto;
+            border: 1px solid var(--border);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        function App() {
+            const [target, setTarget] = useState('');
+            const [scanType, setScanType] = useState('auto');
+            const [activeScanId, setActiveScanId] = useState('');
+            const [scanStatus, setScanStatus] = useState('idle');
+            const [progress, setProgress] = useState(0);
+            const [log, setLog] = useState([]);
+            const [findings, setFindings] = useState({});
+            const [history, setHistory] = useState([]);
+            const [activeTab, setActiveTab] = useState('summary');
+            
+            // API Keys state
+            const [keys, setKeys] = useState({
+                hibp_key: localStorage.getItem('hibp_key') || '',
+                bd_key: localStorage.getItem('bd_key') || '',
+                hunter_key: localStorage.getItem('hunter_key') || '',
+                intelx_key: localStorage.getItem('intelx_key') || '',
+                leakcheck_key: localStorage.getItem('leakcheck_key') || '',
+                leak_lookup_key: localStorage.getItem('leak_lookup_key') || '',
+                osintleak_key: localStorage.getItem('osintleak_key') || ''
+            });
+
+            const consoleEndRef = useRef(null);
+
+            useEffect(() => {
+                fetchHistory();
+            }, []);
+
+            useEffect(() => {
+                if (consoleEndRef.current) {
+                    consoleEndRef.current.scrollIntoView({ behavior: 'smooth' });
+                }
+            }, [log]);
+
+            const saveKey = (name, value) => {
+                localStorage.setItem(name, value);
+                setKeys(prev => ({ ...prev, [name]: value }));
+            };
+
+            const fetchHistory = async () => {
+                try {
+                    const res = await fetch('/api/history');
+                    const data = await res.json();
+                    setHistory(data);
+                } catch (e) {
+                    console.error('Error fetching scan history:', e);
+                }
+            };
+
+            const startScan = async (e) => {
+                e.preventDefault();
+                if (!target) return;
+
+                setScanStatus('queued');
+                setProgress(0);
+                setLog([{ ts: new Date().toISOString(), stage: 'Init', detail: 'Connecting to database...' }]);
+                setFindings({});
+
+                try {
+                    const res = await fetch('/api/scan', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            target,
+                            type: scanType,
+                            options: keys
+                        })
+                    });
+                    const data = await res.json();
+                    if (data.scan_id) {
+                        setActiveScanId(data.scan_id);
+                        connectWebSocket(data.scan_id);
+                    } else {
+                        setScanStatus('error');
+                        setLog(prev => [...prev, { ts: new Date().toISOString(), stage: 'Error', detail: data.error || 'Failed to start scan.' }]);
+                    }
+                } catch (err) {
+                    setScanStatus('error');
+                    setLog(prev => [...prev, { ts: new Date().toISOString(), stage: 'Error', detail: err.message }]);
+                }
+            };
+
+            const connectWebSocket = (scanId) => {
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const ws = new WebSocket(`${protocol}//${window.location.host}/ws/${scanId}`);
+
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'progress') {
+                        setProgress(data.progress);
+                        setLog(data.log);
+                    } else if (data.type === 'complete') {
+                        setProgress(100);
+                        setScanStatus('complete');
+                        setFindings(data.report.findings);
+                        fetchHistory();
+                        ws.close();
+                    } else if (data.type === 'error') {
+                        setScanStatus('error');
+                        ws.close();
+                    } else if (data.type === 'state') {
+                        setProgress(data.progress);
+                        setLog(data.log);
+                        if (data.status === 'complete') {
+                            setScanStatus('complete');
+                            setFindings(data.findings);
+                        }
+                    }
+                };
+            };
+
+            const selectScan = async (scanId) => {
+                setActiveScanId(scanId);
+                setScanStatus('loading');
+                try {
+                    const res = await fetch(`/api/scan/${scanId}`);
+                    const data = await res.json();
+                    setFindings(data.findings);
+                    setProgress(data.progress);
+                    setLog(data.log);
+                    setScanStatus(data.status);
+                } catch (e) {
+                    console.error('Error fetching scan detail:', e);
+                }
+            };
+
+            return (
+                <div>
+                    <header>
+                        <div className="logo-container">
+                            <span className="logo-text">VENOM</span>
+                            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontFamily: 'Outfit' }}>OSINT Synthesis Suite</span>
+                        </div>
+                        <div className="sys-status">
+                            <div className="dot"></div>
+                            System Live
+                        </div>
+                    </header>
+
+                    <main>
+                        {/* Control Panel Panel */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                            <div className="glass-card">
+                                <h2><i data-lucide="shield"></i> Investigation Console</h2>
+                                <form onSubmit={startScan}>
+                                    <div className="form-group">
+                                        <label>Investigation Target</label>
+                                        <input 
+                                            type="text" 
+                                            className="input-text" 
+                                            placeholder="domain.com, email, username..." 
+                                            value={target}
+                                            onChange={e => setTarget(e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="form-group">
+                                        <label>Target Type Signature</label>
+                                        <select value={scanType} onChange={e => setScanType(e.target.value)}>
+                                            <option value="auto">Auto-detect signature</option>
+                                            <option value="email">Email Address</option>
+                                            <option value="domain">Domain / IP Address</option>
+                                            <option value="username">Username / Social handle</option>
+                                            <option value="phone">Phone Number</option>
+                                            <option value="password">Password Audit</option>
+                                        </select>
+                                    </div>
+                                    <button type="submit" className="btn-primary" disabled={scanStatus === 'queued' || scanStatus === 'running'}>
+                                        <i data-lucide="zap"></i> Start Reconnaissance
+                                    </button>
+                                </form>
+
+                                {scanStatus !== 'idle' && (
+                                    <div className="progress-container">
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem', fontSize: '0.85rem' }}>
+                                            <span>Scan status: <strong style={{ color: 'var(--primary)' }}>{scanStatus}</strong></span>
+                                            <span>{progress}%</span>
+                                        </div>
+                                        <div className="progress-bar-bg">
+                                            <div className="progress-bar-fill" style={{ width: `${progress}%` }}></div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="glass-card">
+                                <h2><i data-lucide="key"></i> API Integrations</h2>
+                                <div style={{ maxHeight: '200px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
+                                    {[
+                                        { id: 'hibp_key', label: 'HaveIBeenPwned API Key' },
+                                        { id: 'bd_key', label: 'BreachDirectory Key' },
+                                        { id: 'hunter_key', label: 'Hunter.io API Key' },
+                                        { id: 'intelx_key', label: 'IntelX API Key' },
+                                        { id: 'leakcheck_key', label: 'LeakCheck Key' },
+                                        { id: 'leak_lookup_key', label: 'Leak-Lookup Key' },
+                                        { id: 'osintleak_key', label: 'OSINTLeak API Key' }
+                                    ].map(item => (
+                                        <div key={item.id}>
+                                            <label>{item.label}</label>
+                                            <input 
+                                                type="password" 
+                                                className="input-text" 
+                                                style={{ padding: '0.4rem 0.6rem', fontSize: '0.85rem' }} 
+                                                value={keys[item.id]}
+                                                onChange={e => saveKey(item.id, e.target.value)}
+                                            />
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="glass-card">
+                                <h2><i data-lucide="history"></i> Scan Registry</h2>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', maxHeight: '180px', overflowY: 'auto' }}>
+                                    {history.map(item => (
+                                        <div 
+                                            key={item.id} 
+                                            onClick={() => selectScan(item.id)}
+                                            style={{ 
+                                                padding: '0.6rem', 
+                                                background: activeScanId === item.id ? 'rgba(16,185,129,0.1)' : 'rgba(255,255,255,0.01)',
+                                                border: '1px solid var(--border)',
+                                                borderRadius: '6px',
+                                                cursor: 'pointer',
+                                                fontSize: '0.85rem'
+                                            }}
+                                        >
+                                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                                <strong>{item.target}</strong>
+                                                <span style={{ color: 'var(--text-muted)' }}>{item.id}</span>
+                                            </div>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.2rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                                <span>{item.type}</span>
+                                                <span className={`badge ${item.status === 'complete' ? 'badge-green' : 'badge-yellow'}`}>{item.status}</span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Scan Results Panel */}
+                        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', minHeight: '600px' }}>
+                            <div className="tabs">
+                                <button className={`tab-btn ${activeTab === 'summary' ? 'active' : ''}`} onClick={() => setActiveTab('summary')}>Summary</button>
+                                <button className={`tab-btn ${activeTab === 'breaches' ? 'active' : ''}`} onClick={() => setActiveTab('breaches')}>Breaches</button>
+                                <button className={`tab-btn ${activeTab === 'social' ? 'active' : ''}`} onClick={() => setActiveTab('social')}>Social Profiles</button>
+                                <button className={`tab-btn ${activeTab === 'domain' ? 'active' : ''}`} onClick={() => setActiveTab('domain')}>Domain / Host Info</button>
+                                <button className={`tab-btn ${activeTab === 'raw' ? 'active' : ''}`} onClick={() => setActiveTab('raw')}>Raw Response</button>
+                            </div>
+
+                            <div style={{ flex: 1 }}>
+                                {activeTab === 'summary' && (
+                                    <div>
+                                        <div className="flex-container" style={{ marginBottom: '2rem' }}>
+                                            <div className="stat-card">
+                                                <label>Breach Exposures</label>
+                                                <div className="stat-value" style={{ color: 'var(--error)' }}>
+                                                    {findings.hibp?.breaches?.length || findings.leakcheck?.found || 0}
+                                                </div>
+                                            </div>
+                                            <div className="stat-card">
+                                                <label>Social Identifiers</label>
+                                                <div className="stat-value">
+                                                    {findings.social?.found?.length || 0}
+                                                </div>
+                                            </div>
+                                            <div className="stat-card">
+                                                <label>Resolved Hosts</label>
+                                                <div className="stat-value">
+                                                    {findings.domain?.subdomains?.length || 0}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <h3 style={{ marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.4rem' }}>Target Profile Information</h3>
+                                        {findings.name_inference && (
+                                            <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                                                    <div><strong>Inferred First Name:</strong> {findings.name_inference.first || 'Unknown'}</div>
+                                                    <div><strong>Inferred Last Name:</strong> {findings.name_inference.last || 'Unknown'}</div>
+                                                    <div><strong>Inferred Gender:</strong> {findings.name_inference.gender || 'Unknown'}</div>
+                                                    <div><strong>Email Format:</strong> Valid Structure</div>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        <div className="console-box">
+                                            {log.map((line, idx) => (
+                                                <div key={idx} className="console-line">
+                                                    <span className="ts">[{line.ts.slice(11, 19)}]</span>
+                                                    <strong>[{line.stage}]</strong>
+                                                    <span>{line.detail}</span>
+                                                </div>
+                                            ))}
+                                            <div ref={consoleEndRef} />
+                                        </div>
+                                    </div>
+                                )}
+
+                                {activeTab === 'breaches' && (
+                                    <div>
+                                        {findings.hibp?.breaches?.length > 0 ? (
+                                            <table className="data-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Breach Title</th>
+                                                        <th>Domain</th>
+                                                        <th>Exposed Records</th>
+                                                        <th>Data Classes</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {findings.hibp.breaches.map((b, idx) => (
+                                                        <tr key={idx}>
+                                                            <td><strong>{b.Title}</strong></td>
+                                                            <td>{b.Domain}</td>
+                                                            <td><span className="badge badge-red">{b.PwnCount.toLocaleString()}</span></td>
+                                                            <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{b.DataClasses.join(', ')}</td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        ) : (
+                                            <div style={{ color: 'var(--text-muted)', textAlign: 'center', marginTop: '3rem' }}>No breach findings recorded.</div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {activeTab === 'social' && (
+                                    <div>
+                                        {findings.social?.found?.length > 0 ? (
+                                            <div className="social-grid">
+                                                {findings.social.found.map((item, idx) => (
+                                                    <div className="social-item" key={idx}>
+                                                        <div className="social-icon">
+                                                            <i data-lucide="user"></i>
+                                                        </div>
+                                                        <div>
+                                                            <div style={{ fontWeight: '600' }}>{item.platform}</div>
+                                                            <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: '0.8rem', color: 'var(--primary)' }}>View Profile</a>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <div style={{ color: 'var(--text-muted)', textAlign: 'center', marginTop: '3rem' }}>No social media matches found.</div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {activeTab === 'domain' && (
+                                    <div>
+                                        {findings.domain ? (
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                                                {findings.domain.whois && (
+                                                    <div>
+                                                        <h4 style={{ color: 'var(--primary)', marginBottom: '0.5rem' }}>WHOIS / Registrar Info</h4>
+                                                        <pre style={{ fontSize: '0.8rem' }}>
+                                                            {JSON.stringify(findings.domain.whois, null, 2)}
+                                                        </pre>
+                                                    </div>
+                                                )}
+                                                {findings.domain.ip && (
+                                                    <div>
+                                                        <h4 style={{ color: 'var(--primary)', marginBottom: '0.5rem' }}>Network Routing Details</h4>
+                                                        <pre style={{ fontSize: '0.8rem' }}>
+                                                            {JSON.stringify(findings.domain.ip, null, 2)}
+                                                        </pre>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <div style={{ color: 'var(--text-muted)', textAlign: 'center', marginTop: '3rem' }}>No domain records available.</div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {activeTab === 'raw' && (
+                                    <div>
+                                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginBottom: '1rem' }}>
+                                            <a href={`/api/scan/${activeScanId}/export?format=json`} download className="btn-primary" style={{ display: 'inline-flex', width: 'auto', padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}>Export JSON</a>
+                                            <a href={`/api/scan/${activeScanId}/export?format=html`} download className="btn-primary" style={{ display: 'inline-flex', width: 'auto', padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}>Export HTML</a>
+                                            <a href={`/api/scan/${activeScanId}/export?format=csv`} download className="btn-primary" style={{ display: 'inline-flex', width: 'auto', padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}>Export CSV</a>
+                                        </div>
+                                        <pre style={{ maxHeight: '500px', overflowY: 'auto' }}>
+                                            {JSON.stringify(findings, null, 2)}
+                                        </pre>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </main>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+
+        // Refresh lucide icons after rendering
+        setTimeout(() => {
+            if (window.lucide) {
+                window.lucide.createIcons();
+            }
+        }, 1000);
+    </script>
+</body>
+</html>
