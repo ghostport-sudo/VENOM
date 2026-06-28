@@ -140,6 +140,7 @@ from modules.breach import (
     OSINTLeakModule
 )
 
+from modules.search import DuckDuckGoModule
 from modules.dorks import (
     generate_dorks,
     extra_dorks as v4_extra_dorks,
@@ -403,6 +404,11 @@ async def run_scan_engine(targets: Dict[str, str], opts: Dict[str, Any]) -> None
         if "password" in targets:
             section("PASSWORD BREACH CHECK")
             tasks["password_audit"] = PasswordKAnonymityModule(targets["password"], proxy=proxy).run(session)
+
+        # ── Trigger AI Agent Web Search ──────────────────────────────────────
+        for t_type, t_val in targets.items():
+            if t_type in ("email", "username", "domain"):
+                tasks[f"web_search_{t_type}"] = DuckDuckGoModule(t_val, proxy=proxy).run(session)
 
         # ── Run the Harvest concurrently ──────────────────────────────────────
         if tasks:

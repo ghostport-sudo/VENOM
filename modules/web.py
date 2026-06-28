@@ -83,6 +83,8 @@ from modules.breach import (
     OSINTLeakModule,
 )
 
+from modules.search import DuckDuckGoModule
+
 from modules.dorks import (
     generate_dorks,
     extra_dorks as v4_extra_dorks,
@@ -285,6 +287,13 @@ async def _execute_scan(scan_id: str, target: str, scan_type: str, opts: dict) -
                 scan["progress"] = 5
                 tasks["password_audit"] = PasswordKAnonymityModule(targets["password"], proxy=proxy).run(session)
 
+            # ── Web Search / AI Agent Context ──────────────────────────────
+            await _push(scan_id, "search", "Pulling live web context for AI...")
+            scan["progress"] = 5
+            for t_type, t_val in targets.items():
+                if t_type in ("email", "username", "domain"):
+                    tasks[f"web_search_{t_type}"] = DuckDuckGoModule(t_val, proxy=proxy).run(session)
+
             # ── Harvest concurrently ──────────────────────────────────────
             await _push(scan_id, "harvest", f"Launching {len(tasks)} concurrent probes...")
             scan["progress"] = 15
@@ -445,7 +454,7 @@ async def handle_api_scan_status(request: web.Request) -> web.Response:
     scan_id = request.match_info["scan_id"]
     if scan_id not in _scans:
         return web.json_response({"error": "Scan not found"}, status=404)
-    return web.json_response(_scans[scan_id], default=_default_serialiser)
+    return web.json_response(_scans[scan_id], dumps=lambda obj: json.dumps(obj, default=_default_serialiser))
 
 
 async def handle_api_scan_export(request: web.Request) -> web.Response:
@@ -462,7 +471,7 @@ async def handle_api_scan_export(request: web.Request) -> web.Response:
     report = scan.get("report", {})
 
     if fmt == "json":
-        return web.json_response(report, default=_default_serialiser, headers={
+        return web.json_response(report, dumps=lambda obj: json.dumps(obj, default=_default_serialiser), headers={
             "Content-Disposition": f'attachment; filename="venom_{scan_id}.json"',
         })
     elif fmt == "csv":
@@ -495,6 +504,47 @@ async def handle_api_scan_export(request: web.Request) -> web.Response:
         )
 
     return web.json_response({"error": f"Unknown format: {fmt}"}, status=400)
+
+
+async def handle_api_scan_ai_chat(request: web.Request) -> web.Response:
+    """POST /api/scan/{scan_id}/ai_chat — talk to the AI agent about a scan."""
+    scan_id = request.match_info["scan_id"]
+    if scan_id not in _scans:
+        return web.json_response({"error": "Scan not found"}, status=404)
+
+    scan = _scans[scan_id]
+    
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+    messages = body.get("messages", [])
+    api_key = body.get("api_key", "").strip()
+    provider = body.get("provider", "gemini").strip()
+    model = body.get("model", "").strip()
+    base_url = body.get("base_url", "").strip()
+    
+    if provider != "custom" and not api_key:
+        return web.json_response({"error": f"{provider.capitalize()} API key is required"}, status=400)
+
+    findings = scan.get("findings", {})
+    if not findings:
+        findings = scan.get("report", {}).get("findings", {})
+
+    try:
+        from modules.ai import query_ai
+        response_text = await query_ai(
+            provider=provider,
+            api_key=api_key,
+            findings=findings,
+            messages=messages,
+            model=model,
+            base_url=base_url
+        )
+        return web.json_response({"response": response_text})
+    except Exception as exc:
+        return web.json_response({"error": str(exc)}, status=500)
 
 
 async def handle_api_history(request: web.Request) -> web.Response:
@@ -570,6 +620,7 @@ def create_app() -> web.Application:
     app.router.add_post("/api/scan", handle_api_scan_start)
     app.router.add_get("/api/scan/{scan_id}", handle_api_scan_status)
     app.router.add_get("/api/scan/{scan_id}/export", handle_api_scan_export)
+    app.router.add_post("/api/scan/{scan_id}/ai_chat", handle_api_scan_ai_chat)
     app.router.add_get("/api/history", handle_api_history)
     app.router.add_get("/ws/{scan_id}", handle_ws)
 
@@ -587,3 +638,4 @@ def start_server(host: str = "127.0.0.1", port: int = 5000) -> None:
     print(f"\n  [+] VENOM Web Interface running at \033[1mhttp://{host}:{port}\033[0m")
     print(f"  \033[2m  Press Ctrl+C to stop\033[0m\n")
     web.run_app(app, host=host, port=port, print=None)
+

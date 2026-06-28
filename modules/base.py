@@ -1,5 +1,6 @@
 import abc
 import asyncio
+import json
 import random
 from typing import Any, Dict, Optional, List
 import aiohttp
@@ -70,14 +71,18 @@ class BaseOSINTModule(abc.ABC):
 
         timeout_sec = kwargs.pop("timeout", 10)
         is_json = kwargs.pop("is_json_response", False)
+        
+        # Never follow redirects by default to prevent false-positives (e.g. redirecting to homepage or auth portal instead of returning 404)
+        if "allow_redirects" not in kwargs:
+            kwargs["allow_redirects"] = False
 
-        async with session.request(method, url, timeout=aiohttp.ClientTimeout(total=timeout_sec), **kwargs) as resp:
+        async with session.request(method, url, timeout=aiohttp.ClientTimeout(total=timeout_sec), ssl=False, **kwargs) as resp:
             status = resp.status
-            
-            # Read response body
+
+            # Read response body once
             body_text = ""
             try:
-                body_text = await resp.text()
+                body_text = await resp.text(errors='ignore')
             except Exception:
                 try:
                     body_bytes = await resp.read()
@@ -92,14 +97,15 @@ class BaseOSINTModule(abc.ABC):
             # Return appropriate format
             if is_json:
                 try:
-                    return await resp.json()
-                except Exception:
+                    # Parse JSON from the already-read body text
+                    return json.loads(body_text)
+                except (json.JSONDecodeError, ValueError):
                     # If JSON parsing fails, check if the response status is an error
                     if status >= 400:
                         resp.raise_for_status()
                     return {"error": "InvalidJSON", "body": body_text, "status_code": status}
-            
-            # For non-json, return text (or status if error)
+
+            # For non-json, return text (or raise if error)
             if status >= 400:
                 resp.raise_for_status()
             return body_text

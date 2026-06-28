@@ -37,106 +37,208 @@ BANNER = r"""
     \  /  | |____| |\  | |__| | |  | |
      \/   |______|_| \_|\____/|_|  |_|
 
-  OSINT Breach Scanner v6.0
+  OSINT Breach Scanner v7.0
       By: ghostport
 """
 
 # ── Social platform registry ─────────────────────────────────────────────────
-# Each entry maps a human-readable name to (URL template, not-exist signals).
-# The URL template uses {} as a placeholder for the username.
+# Detection methods:
+#   "status_code" — relies on HTTP status (404 = not found, 200 = found)
+#   "api_json"    — uses a JSON API endpoint; key/value checked for existence
+#   "body_text"   — checks response body for not-found signals (last resort)
+#
+# Platforms that are SPA-only, require auth, or block all scrapers are REMOVED
+# to eliminate false positives. Only platforms with reliable unauthenticated
+# detection are included.
 
 SOCIAL_PLATFORMS = {
-    # ── Original platforms ────────────────────────────────────────────────
-    "GitHub":       ("https://github.com/{}",                          ["not found"]),
-    "Twitter/X":    ("https://twitter.com/{}",                         ["this account doesn't exist"]),
-    "Instagram":    ("https://www.instagram.com/{}/",                  ["page not found", "sorry, this"]),
-    "Reddit":       ("https://www.reddit.com/user/{}",                 ["nobody on reddit goes by that name"]),
-    "TikTok":       ("https://www.tiktok.com/@{}",                     ["couldn't find this account"]),
-    "LinkedIn":     ("https://www.linkedin.com/in/{}",                 ["page not found"]),
-    "Pinterest":    ("https://www.pinterest.com/{}/",                  ["sorry! we couldn't find that page"]),
-    "Twitch":       ("https://www.twitch.tv/{}",                       ["sorry. unless you"]),
-    "YouTube":      ("https://www.youtube.com/@{}",                    ["this page isn't available"]),
-    "Snapchat":     ("https://www.snapchat.com/add/{}",                ["this profile doesn't exist"]),
-    "Tumblr":       ("https://{}.tumblr.com",                          ["there's nothing here"]),
-    "Pastebin":     ("https://pastebin.com/u/{}",                      ["not found"]),
-    "Keybase":      ("https://keybase.io/{}",                          ["not found"]),
-    "GitLab":       ("https://gitlab.com/{}",                          ["404", "not found"]),
-    "HackerNews":   ("https://news.ycombinator.com/user?id={}",        ["no such user"]),
-    "DeviantArt":   ("https://www.deviantart.com/{}",                  ["not found"]),
-    "Flickr":       ("https://www.flickr.com/people/{}",               ["not found"]),
-    "Gravatar":     ("https://en.gravatar.com/{}",                     ["profile not found"]),
-    "Codecademy":   ("https://www.codecademy.com/profiles/{}",         ["404"]),
-    "Replit":       ("https://replit.com/@{}",                         ["not found"]),
-    "Mastodon":     ("https://mastodon.social/@{}",                    ["not found", "no such account"]),
-    "Steam":        ("https://steamcommunity.com/id/{}",               ["the specified profile could not be found"]),
-    "SoundCloud":   ("https://soundcloud.com/{}",                      ["404", "not found"]),
-    "Medium":       ("https://medium.com/@{}",                         ["page not found"]),
-    "Substack":     ("https://{}.substack.com",                        ["page not found", "404"]),
-    "ProductHunt":  ("https://www.producthunt.com/@{}",                ["404", "not found"]),
-    "Behance":      ("https://www.behance.net/{}",                     ["page not found"]),
-    "Dribbble":     ("https://dribbble.com/{}",                        ["whoops, that page is gone"]),
-    "Fiverr":       ("https://www.fiverr.com/{}",                      ["not found"]),
-    "HackerEarth":  ("https://www.hackerearth.com/@{}",                ["not found"]),
-    "LeetCode":     ("https://leetcode.com/{}",                        ["user not found"]),
-    "Codeforces":   ("https://codeforces.com/profile/{}",              ["not found"]),
-    "DockerHub":    ("https://hub.docker.com/u/{}",                    ["404"]),
-    "PyPI":         ("https://pypi.org/user/{}/",                      ["not found"]),
-    "AboutMe":      ("https://about.me/{}",                            ["page not found"]),
-    "Telegram":     ("https://t.me/{}",                                ["tg://resolve"]),
-    "Spotify":      ("https://open.spotify.com/user/{}",               ["not found"]),
-    "NPM":          ("https://www.npmjs.com/~{}",                      ["not found"]),
-    "Etsy":         ("https://www.etsy.com/shop/{}",                   ["shop not found"]),
-    # ── v3 additions ─────────────────────────────────────────────────────
-    "Bluesky":      ("https://bsky.app/profile/{}",                    ["profile not found", "not found"]),
-    "Threads":      ("https://www.threads.net/@{}",                    ["page not found"]),
-    "VKontakte":    ("https://vk.com/{}",                              ["page not found"]),
-    "Roblox":       ("https://www.roblox.com/user.aspx?username={}",   ["page not found"]),
-    "Chess.com":    ("https://www.chess.com/member/{}",                ["this member", "404"]),
-    "Bandcamp":     ("https://{}.bandcamp.com",                        ["sorry, that something"]),
-    "Vimeo":        ("https://vimeo.com/{}",                           ["page not found"]),
-    "Bitbucket":    ("https://bitbucket.org/{}/",                      ["404"]),
-    "Codepen":      ("https://codepen.io/{}",                          ["404", "not found"]),
-    "500px":        ("https://500px.com/p/{}",                         ["page not found"]),
-    "Patreon":      ("https://www.patreon.com/{}",                     ["page not found"]),
-    "Upwork":       ("https://www.upwork.com/freelancers/~{}",         ["not found"]),
-    "Hackaday":     ("https://hackaday.io/{}",                         ["page not found"]),
-    "TryHackMe":    ("https://tryhackme.com/p/{}",                     ["page not found", "not found"]),
-    "HackTheBox":   ("https://app.hackthebox.com/users/{}",            ["page not found"]),
-    # ── v5 additions ─────────────────────────────────────────────────────
-    "Cashapp":      ("https://cash.app/${}",                           ["not found", "page not found"]),
-    "Venmo":        ("https://venmo.com/{}",                           ["venmo user not found"]),
-    "OnlyFans":     ("https://onlyfans.com/{}",                        ["this page is not available"]),
-    "Linktree":     ("https://linktr.ee/{}",                           ["sorry, this page isn"]),
-    "Ko-fi":        ("https://ko-fi.com/{}",                           ["page not found"]),
-    "itch.io":      ("https://{}.itch.io",                             ["page not found"]),
-    "Newgrounds":   ("https://{}.newgrounds.com",                      ["doesn't exist"]),
-    "Wattpad":      ("https://www.wattpad.com/user/{}",                ["this page does not exist"]),
-    "Goodreads":    ("https://www.goodreads.com/{}",                   ["page not found"]),
-    "Strava":       ("https://www.strava.com/athletes/{}",             ["not found"]),
-    "MyFitnessPal": ("https://www.myfitnesspal.com/profile/{}",        ["this page is private"]),
-    "Quora":        ("https://www.quora.com/profile/{}",               ["page not found"]),
-    "Clubhouse":    ("https://www.clubhouse.com/@{}",                  ["not found"]),
-    "Imgur":        ("https://imgur.com/user/{}",                      ["there's nothing here"]),
-    "Ask.fm":       ("https://ask.fm/{}",                              ["this user does not exist"]),
-    "Dailymotion":  ("https://www.dailymotion.com/{}",                 ["page not found"]),
-    "VK":           ("https://vk.com/{}",                              ["page not found"]),
-    "Duolingo":     ("https://www.duolingo.com/profile/{}",            ["404"]),
-    "Lichess":      ("https://lichess.org/@/{}",                       ["not found"]),
-    "Letterboxd":   ("https://letterboxd.com/{}",                      ["we couldn't find this person"]),
-    "Last.fm":      ("https://www.last.fm/user/{}",                    ["not found"]),
-    "Trakt":        ("https://trakt.tv/users/{}",                      ["page not found"]),
-    "Livejournal":  ("https://{}.livejournal.com",                     ["was not found"]),
-    "WordPress":    ("https://{}.wordpress.com",                       ["doesn't exist"]),
-    "Blogspot":     ("https://{}.blogspot.com",                        ["not found", "sorry"]),
-    "Sourceforge":  ("https://sourceforge.net/u/{}/profile/",          ["not found"]),
-    "Gitea":        ("https://gitea.com/{}",                           ["not found"]),
-    "Freelancer":   ("https://www.freelancer.com/u/{}",                ["oops", "not found"]),
-    "Mixcloud":     ("https://www.mixcloud.com/{}",                    ["not found"]),
-    "Reverbnation": ("https://www.reverbnation.com/{}",                ["page not found"]),
-    "Audiomack":    ("https://audiomack.com/{}",                       ["page not found"]),
-    "Minds":        ("https://www.minds.com/{}",                       ["page not found"]),
-    "MeWe":         ("https://mewe.com/i/{}",                          ["not found"]),
-    "Gab":          ("https://gab.com/{}",                             ["page not found"]),
+    # ── Reliable status-code based (return 404 for missing users) ────────
+    "GitHub": {
+        "url": "https://api.github.com/users/{}",
+        "method": "status_code",
+        "error_codes": [404],
+    },
+    "GitLab": {
+        "url": "https://gitlab.com/{}",
+        "method": "status_code",
+        "error_codes": [404],
+    },
+    "Reddit": {
+        "url": "https://www.reddit.com/user/{}/about.json",
+        "method": "api_json",
+        "not_found_key": "error",
+        "not_found_value": 404,
+    },
+
+    "Pastebin": {
+        "url": "https://pastebin.com/u/{}",
+        "method": "status_code",
+        "error_codes": [404],
+    },
+    "HackerNews": {
+        "url": "https://hacker-news.firebaseio.com/v0/user/{}.json",
+        "method": "api_json",
+        "found_if_not_null": True,
+    },
+    "DeviantArt": {
+        "url": "https://www.deviantart.com/{}",
+        "method": "status_code",
+        "error_codes": [404],
+    },
+    "Flickr": {
+        "url": "https://www.flickr.com/people/{}/",
+        "method": "status_code",
+        "error_codes": [404],
+    },
+    "Gravatar": {
+        "url": "https://en.gravatar.com/{}.json",
+        "method": "status_code",
+        "error_codes": [404],
+    },
+    "Keybase": {
+        "url": "https://keybase.io/_/api/1.0/user/lookup.json?username={}",
+        "method": "api_json",
+        "found_key": "status",
+        "found_check": lambda d: isinstance(d, dict) and d.get("status", {}).get("code") == 0,
+    },
+    "Steam": {
+        "url": "https://steamcommunity.com/id/{}/?xml=1",
+        "method": "body_text",
+        "found_signals": ["<steamID64>"],
+        "not_found_signals": ["The specified profile could not be found"],
+    },
+    "SoundCloud": {
+        "url": "https://soundcloud.com/{}",
+        "method": "status_code",
+        "error_codes": [404],
+    },
+    "Replit": {
+        "url": "https://replit.com/@{}",
+        "method": "status_code",
+        "error_codes": [404],
+    },
+    "Vimeo": {
+        "url": "https://vimeo.com/{}",
+        "method": "status_code",
+        "error_codes": [404],
+    },
+    "Bitbucket": {
+        "url": "https://bitbucket.org/!api/2.0/users/{}",
+        "method": "status_code",
+        "error_codes": [404],
+    },
+    "Codepen": {
+        "url": "https://codepen.io/{}",
+        "method": "status_code",
+        "error_codes": [404],
+    },
+    "Dribbble": {
+        "url": "https://dribbble.com/{}",
+        "method": "status_code",
+        "error_codes": [404],
+    },
+    "LeetCode": {
+        "url": "https://leetcode.com/{}",
+        "method": "status_code",
+        "error_codes": [404],
+    },
+    "PyPI": {
+        "url": "https://pypi.org/simple/{}/",
+        "method": "status_code",
+        "error_codes": [404],
+    },
+    "NPM": {
+        "url": "https://www.npmjs.com/~{}",
+        "method": "status_code",
+        "error_codes": [404],
+    },
+    "Lichess": {
+        "url": "https://lichess.org/api/user/{}",
+        "method": "status_code",
+        "error_codes": [404],
+    },
+    "Last.fm": {
+        "url": "https://www.last.fm/user/{}",
+        "method": "status_code",
+        "error_codes": [404],
+    },
+    "Letterboxd": {
+        "url": "https://letterboxd.com/{}",
+        "method": "status_code",
+        "error_codes": [404],
+    },
+    "Mastodon": {
+        "url": "https://mastodon.social/@{}",
+        "method": "status_code",
+        "error_codes": [404, 410],
+    },
+    "DockerHub": {
+        "url": "https://hub.docker.com/v2/users/{}",
+        "method": "status_code",
+        "error_codes": [404],
+    },
+    "Sourceforge": {
+        "url": "https://sourceforge.net/u/{}/profile/",
+        "method": "status_code",
+        "error_codes": [404],
+    },
+    "Duolingo": {
+        "url": "https://www.duolingo.com/2017-06-30/users?username={}",
+        "method": "api_json",
+        "found_check": lambda d: isinstance(d, dict) and d.get("users") and len(d["users"]) > 0,
+    },
+    "Telegram": {
+        "url": "https://t.me/{}",
+        "method": "body_text",
+        "found_signals": ["tg://resolve"],
+        "not_found_signals": [],
+        "invert": True,  # tg://resolve present = NOT found (preview page)
+    },
+    "Medium": {
+        "url": "https://medium.com/@{}",
+        "method": "status_code",
+        "error_codes": [404, 410],
+    },
+    "Behance": {
+        "url": "https://www.behance.net/{}",
+        "method": "status_code",
+        "error_codes": [404],
+    },
+    "Mixcloud": {
+        "url": "https://api.mixcloud.com/{}",
+        "method": "api_json",
+        "found_check": lambda d: isinstance(d, dict) and "username" in d,
+    },
+    "Codeforces": {
+        "url": "https://codeforces.com/api/user.info?handles={}",
+        "method": "api_json",
+        "found_check": lambda d: isinstance(d, dict) and d.get("status") == "OK",
+    },
+    "Chess.com": {
+        "url": "https://api.chess.com/pub/player/{}",
+        "method": "status_code",
+        "error_codes": [404],
+    },
+    "Imgur": {
+        "url": "https://imgur.com/user/{}",
+        "method": "status_code",
+        "error_codes": [404],
+    },
+    "Trakt": {
+        "url": "https://trakt.tv/users/{}",
+        "method": "status_code",
+        "error_codes": [404],
+    },
+    "AboutMe": {
+        "url": "https://about.me/{}",
+        "method": "status_code",
+        "error_codes": [404],
+    },
+    "Wattpad": {
+        "url": "https://www.wattpad.com/user/{}",
+        "method": "status_code",
+        "error_codes": [404],
+    },
 }
 
 # ── Country calling-code prefixes ────────────────────────────────────────────
@@ -281,7 +383,7 @@ def print_banner():
     console.print(f"[bold green]{BANNER}[/bold green]")
     console.print(f"[dim]  Started : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}[/dim]")
     console.print(
-        f"[dim]  v6.0 — HIBP · LeakCheck · Leak-Lookup · BreachDir · Dehashed · "
+        f"[dim]  v7.0 — HIBP · LeakCheck · Leak-Lookup · BreachDir · Dehashed · "
         f"PSBDMP · Phonebook.cz · Google · Holehe({len(HOLEHE_SITES)}) · EmailRep · "
         f"OTX · Pulsedive · URLScan · HackerTarget · Social({len(SOCIAL_PLATFORMS)}) · "
         f"GitHub · GitLab · Keybase · Twitter · Telegram · Steam · "

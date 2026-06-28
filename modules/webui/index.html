@@ -390,6 +390,105 @@
             font-family: 'JetBrains Mono', monospace;
             font-size: 0.85rem;
         }
+
+        /* AI Chat CSS */
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            height: 600px;
+            background: rgba(4, 6, 11, 0.4);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+            margin-top: 1rem;
+        }
+
+        .chat-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 1.5rem;
+            background: rgba(16, 185, 129, 0.05);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 1.5rem;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1.2rem;
+        }
+
+        .chat-message {
+            display: flex;
+            flex-direction: column;
+            max-width: 85%;
+            padding: 1rem 1.25rem;
+            border-radius: 12px;
+            font-size: 0.92rem;
+            line-height: 1.6;
+        }
+
+        .chat-message.user {
+            align-self: flex-end;
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(6, 182, 212, 0.2) 100%);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-top-right-radius: 2px;
+            color: #e2fef4;
+        }
+
+        .chat-message.model {
+            align-self: flex-start;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border);
+            border-top-left-radius: 2px;
+            color: var(--text-main);
+        }
+
+        .chat-message-meta {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-bottom: 0.4rem;
+            font-weight: 500;
+        }
+
+        .chat-input-container {
+            display: flex;
+            gap: 0.8rem;
+            padding: 1rem 1.5rem;
+            background: rgba(4, 6, 11, 0.6);
+            border-top: 1px solid var(--border);
+        }
+
+        .ai-loading-spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(16, 185, 129, 0.1);
+            border-radius: 50%;
+            border-top-color: var(--primary);
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .ai-setup-alert {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 3rem;
+            gap: 1.5rem;
+            background: rgba(239, 68, 68, 0.03);
+            border: 1px dashed rgba(239, 68, 68, 0.2);
+            border-radius: 12px;
+            color: var(--text-muted);
+            margin-top: 1rem;
+        }
     </style>
 </head>
 <body>
@@ -410,6 +509,11 @@
             const [history, setHistory] = useState([]);
             const [activeTab, setActiveTab] = useState('summary');
             
+            // AI Chat State
+            const [chatMessages, setChatMessages] = useState([]);
+            const [chatInput, setChatInput] = useState('');
+            const [chatLoading, setChatLoading] = useState(false);
+            
             // API Keys state
             const [keys, setKeys] = useState({
                 hibp_key: localStorage.getItem('hibp_key') || '',
@@ -418,10 +522,16 @@
                 intelx_key: localStorage.getItem('intelx_key') || '',
                 leakcheck_key: localStorage.getItem('leakcheck_key') || '',
                 leak_lookup_key: localStorage.getItem('leak_lookup_key') || '',
-                osintleak_key: localStorage.getItem('osintleak_key') || ''
+                osintleak_key: localStorage.getItem('osintleak_key') || '',
+                gemini_key: localStorage.getItem('gemini_key') || '',
+                ai_provider: localStorage.getItem('ai_provider') || 'gemini',
+                ai_key: localStorage.getItem('ai_key') || localStorage.getItem('gemini_key') || '',
+                ai_model: localStorage.getItem('ai_model') || 'gemini-1.5-flash',
+                ai_url: localStorage.getItem('ai_url') || ''
             });
 
             const consoleEndRef = useRef(null);
+            const chatEndRef = useRef(null);
 
             useEffect(() => {
                 fetchHistory();
@@ -432,6 +542,121 @@
                     consoleEndRef.current.scrollIntoView({ behavior: 'smooth' });
                 }
             }, [log]);
+
+            useEffect(() => {
+                if (chatEndRef.current) {
+                    chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+                }
+            }, [chatMessages]);
+
+            useEffect(() => {
+                setChatMessages([]);
+            }, [activeScanId]);
+
+            useEffect(() => {
+                const hasKey = keys.ai_provider === 'custom' || keys.ai_key;
+                if (activeTab === 'ai' && activeScanId && chatMessages.length === 0 && hasKey) {
+                    generateInitialReport();
+                }
+            }, [activeTab, activeScanId, keys.ai_provider, keys.ai_key]);
+
+            const generateInitialReport = async () => {
+                setChatLoading(true);
+                const initialUserMessage = {
+                    role: 'user',
+                    content: 'Please analyze the findings and generate a comprehensive target dossier/intelligence report.'
+                };
+                
+                setChatMessages([initialUserMessage]);
+                
+                try {
+                    const res = await fetch(`/api/scan/${activeScanId}/ai_chat`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            messages: [initialUserMessage],
+                            api_key: keys.ai_key,
+                            provider: keys.ai_provider,
+                            model: keys.ai_model,
+                            base_url: keys.ai_url
+                        })
+                    });
+                    
+                    const data = await res.json();
+                    if (data.response) {
+                        setChatMessages([
+                            initialUserMessage,
+                            { role: 'assistant', content: data.response }
+                        ]);
+                    } else {
+                        setChatMessages(prev => [
+                            ...prev,
+                            { role: 'assistant', content: `Error: ${data.error || 'Failed to synthesize intelligence report.'}` }
+                        ]);
+                    }
+                } catch (err) {
+                    setChatMessages(prev => [
+                        ...prev,
+                        { role: 'assistant', content: `Error: ${err.message}` }
+                    ]);
+                } finally {
+                    setChatLoading(false);
+                }
+            };
+
+            const sendChatMessage = async (e) => {
+                e.preventDefault();
+                if (!chatInput.trim() || chatLoading) return;
+                
+                const userMessage = { role: 'user', content: chatInput };
+                const updatedMessages = [...chatMessages, userMessage];
+                setChatMessages(updatedMessages);
+                setChatInput('');
+                setChatLoading(true);
+                
+                try {
+                    const res = await fetch(`/api/scan/${activeScanId}/ai_chat`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            messages: updatedMessages,
+                            api_key: keys.ai_key,
+                            provider: keys.ai_provider,
+                            model: keys.ai_model,
+                            base_url: keys.ai_url
+                        })
+                    });
+                    
+                    const data = await res.json();
+                    if (data.response) {
+                        setChatMessages([...updatedMessages, { role: 'assistant', content: data.response }]);
+                    } else {
+                        setChatMessages([...updatedMessages, { role: 'assistant', content: `Error: ${data.error || 'Failed to communicate with AI Agent.'}` }]);
+                    }
+                } catch (err) {
+                    setChatMessages([...updatedMessages, { role: 'assistant', content: `Error: ${err.message}` }]);
+                } finally {
+                    setChatLoading(false);
+                }
+            };
+
+            const renderMarkdown = (text) => {
+                if (!text) return { __html: '' };
+                let esc = text
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;");
+                
+                esc = esc.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                esc = esc.replace(/`(.*?)`/g, '<code style="background: rgba(0,0,0,0.4); padding: 0.1rem 0.3rem; border-radius: 4px; font-family: monospace; font-size: 0.85em; border: 1px solid rgba(255,255,255,0.05);">$1</code>');
+                esc = esc.replace(/```([\s\S]*?)```/g, '<pre style="background:#020408; padding: 0.8rem; border-radius: 6px; overflow-x:auto; margin: 0.5rem 0; border: 1px solid rgba(255,255,255,0.05);"><code style="font-family: monospace;">$1</code></pre>');
+                esc = esc.replace(/^### (.*$)/gim, '<h4 style="margin: 0.8rem 0 0.4rem 0; color: var(--primary);">$1</h4>');
+                esc = esc.replace(/^## (.*$)/gim, '<h3 style="margin: 1rem 0 0.5rem 0; color: var(--primary);">$1</h3>');
+                esc = esc.replace(/^# (.*$)/gim, '<h2 style="margin: 1.2rem 0 0.6rem 0; color: var(--primary); font-size: 1.3rem;">$1</h2>');
+                esc = esc.replace(/^\s*[-*]\s+(.*)$/gm, '<li style="margin-left: 1.5rem; margin-bottom: 0.2rem; list-style-type: square;">$1</li>');
+                esc = esc.replace(/\n/g, '<br/>');
+                return { __html: esc };
+            };
 
             const saveKey = (name, value) => {
                 localStorage.setItem(name, value);
@@ -585,7 +810,7 @@
 
                             <div className="glass-card">
                                 <h2><i data-lucide="key"></i> API Integrations</h2>
-                                <div style={{ maxHeight: '200px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
+                                <div style={{ maxHeight: '160px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
                                     {[
                                         { id: 'hibp_key', label: 'HaveIBeenPwned API Key' },
                                         { id: 'bd_key', label: 'BreachDirectory Key' },
@@ -606,6 +831,67 @@
                                             />
                                         </div>
                                     ))}
+                                </div>
+                            </div>
+
+                            <div className="glass-card">
+                                <h2><i data-lucide="brain"></i> AI Analyst Settings</h2>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
+                                    <div>
+                                        <label style={{ fontSize: '0.8rem', display: 'block', marginBottom: '0.2rem' }}>AI Provider</label>
+                                        <select 
+                                            value={keys.ai_provider} 
+                                            onChange={e => {
+                                                const prov = e.target.value;
+                                                saveKey('ai_provider', prov);
+                                                if (prov === 'gemini') saveKey('ai_model', 'gemini-1.5-flash');
+                                                else if (prov === 'groq') saveKey('ai_model', 'llama-3.3-70b-versatile');
+                                                else if (prov === 'openrouter') saveKey('ai_model', 'openrouter/free');
+                                                else if (prov === 'custom') saveKey('ai_model', 'gpt-4o');
+                                            }}
+                                            style={{ width: '100%', padding: '0.4rem', borderRadius: '4px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border)', color: 'var(--text)' }}
+                                        >
+                                            <option value="gemini">Google Gemini (AI Studio)</option>
+                                            <option value="groq">Groq (Llama 3 / Gemma 2 - FREE)</option>
+                                            <option value="openrouter">OpenRouter (Free Models)</option>
+                                            <option value="custom">Custom OpenAI-Compatible</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label style={{ fontSize: '0.8rem', display: 'block', marginBottom: '0.2rem' }}>API Key</label>
+                                        <input 
+                                            type="password" 
+                                            className="input-text" 
+                                            placeholder={keys.ai_provider === 'custom' ? 'Optional API key' : 'Enter API key'}
+                                            style={{ padding: '0.4rem 0.6rem', fontSize: '0.85rem' }}
+                                            value={keys.ai_key}
+                                            onChange={e => saveKey('ai_key', e.target.value)}
+                                        />
+                                    </div>
+                                    {keys.ai_provider === 'custom' && (
+                                        <div>
+                                            <label style={{ fontSize: '0.8rem', display: 'block', marginBottom: '0.2rem' }}>Base URL</label>
+                                            <input 
+                                                type="text" 
+                                                className="input-text" 
+                                                placeholder="https://api.example.com/v1"
+                                                style={{ padding: '0.4rem 0.6rem', fontSize: '0.85rem' }}
+                                                value={keys.ai_url}
+                                                onChange={e => saveKey('ai_url', e.target.value)}
+                                            />
+                                        </div>
+                                    )}
+                                    <div>
+                                        <label style={{ fontSize: '0.8rem', display: 'block', marginBottom: '0.2rem' }}>Model Identifier</label>
+                                        <input 
+                                            type="text" 
+                                            className="input-text" 
+                                            placeholder="e.g. gemini-1.5-flash"
+                                            style={{ padding: '0.4rem 0.6rem', fontSize: '0.85rem' }}
+                                            value={keys.ai_model}
+                                            onChange={e => saveKey('ai_model', e.target.value)}
+                                        />
+                                    </div>
                                 </div>
                             </div>
 
@@ -646,6 +932,18 @@
                                 <button className={`tab-btn ${activeTab === 'breaches' ? 'active' : ''}`} onClick={() => setActiveTab('breaches')}>Breaches</button>
                                 <button className={`tab-btn ${activeTab === 'social' ? 'active' : ''}`} onClick={() => setActiveTab('social')}>Social Profiles</button>
                                 <button className={`tab-btn ${activeTab === 'domain' ? 'active' : ''}`} onClick={() => setActiveTab('domain')}>Domain / Host Info</button>
+                                <button className={`tab-btn ${activeTab === 'ai' ? 'active' : ''}`} onClick={() => {
+                                    setActiveTab('ai');
+                                    // Refresh lucide icons after tab change
+                                    setTimeout(() => {
+                                        if (window.lucide) window.lucide.createIcons();
+                                    }, 100);
+                                }}>
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+                                        <i data-lucide="brain" style={{ width: '14px', height: '14px' }}></i>
+                                        AI Analyst
+                                    </span>
+                                </button>
                                 <button className={`tab-btn ${activeTab === 'raw' ? 'active' : ''}`} onClick={() => setActiveTab('raw')}>Raw Response</button>
                             </div>
 
@@ -737,8 +1035,8 @@
                                                             <i data-lucide="user"></i>
                                                         </div>
                                                         <div>
-                                                            <div style={{ fontWeight: '600' }}>{item.platform}</div>
-                                                            <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: '0.8rem', color: 'var(--primary)' }}>View Profile</a>
+                                                            <div style={{ fontWeight: '600' }}>{item[0]}</div>
+                                                            <a href={item[1]} target="_blank" rel="noopener noreferrer" style={{ fontSize: '0.8rem', color: 'var(--primary)' }}>View Profile</a>
                                                         </div>
                                                     </div>
                                                 ))}
@@ -772,6 +1070,73 @@
                                             </div>
                                         ) : (
                                             <div style={{ color: 'var(--text-muted)', textAlign: 'center', marginTop: '3rem' }}>No domain records available.</div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {activeTab === 'ai' && (
+                                    <div>
+                                        {(keys.ai_provider !== 'custom' && !keys.ai_key) ? (
+                                             <div className="ai-setup-alert">
+                                                 <i data-lucide="alert-triangle" style={{ width: '48px', height: '48px', color: 'var(--error)' }}></i>
+                                                 <h3>AI Agent Configuration Required</h3>
+                                                 <p style={{ maxWidth: '400px' }}>
+                                                     To enable the personal AI Analyst Agent, please configure your <strong>AI Provider & API Key</strong> in the <strong>AI Analyst Settings</strong> sidebar on the left.
+                                                 </p>
+                                             </div>
+                                         ) : !activeScanId ? (
+                                             <div style={{ color: 'var(--text-muted)', textAlign: 'center', marginTop: '3rem' }}>
+                                                 Please select or run a scan to consult the AI Analyst Agent.
+                                             </div>
+                                         ) : (
+                                             <div className="chat-container">
+                                                 <div className="chat-header">
+                                                     <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: '600' }}>
+                                                         <i data-lucide="brain" style={{ color: 'var(--primary)', width: '18px', height: '18px' }}></i>
+                                                         VENOM AI Correlation Agent
+                                                     </span>
+                                                     <span className="badge badge-green" style={{ fontSize: '0.7rem' }}>
+                                                         {keys.ai_provider === 'gemini' ? 'Gemini Online' :
+                                                          keys.ai_provider === 'groq' ? 'Groq Online' :
+                                                          keys.ai_provider === 'openrouter' ? 'OpenRouter Online' : 'AI Agent Online'}
+                                                     </span>
+                                                 </div>
+                                                
+                                                <div className="chat-messages">
+                                                    {chatMessages.map((msg, idx) => (
+                                                        <div key={idx} className={`chat-message ${msg.role === 'user' ? 'user' : 'model'}`}>
+                                                            <div className="chat-message-meta">
+                                                                {msg.role === 'user' ? 'Investigator' : 'VENOM AI Agent'}
+                                                            </div>
+                                                            <div dangerouslySetInnerHTML={renderMarkdown(msg.content)}></div>
+                                                        </div>
+                                                    ))}
+                                                    {chatLoading && chatMessages.length % 2 === 1 && (
+                                                        <div className="chat-message model">
+                                                            <div className="chat-message-meta">VENOM AI Agent</div>
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                                <div className="ai-loading-spinner"></div>
+                                                                <span>Correlating intelligence data...</span>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    <div ref={chatEndRef} />
+                                                </div>
+
+                                                <form onSubmit={sendChatMessage} className="chat-input-container">
+                                                    <input 
+                                                        type="text" 
+                                                        className="input-text" 
+                                                        placeholder="Ask VENOM AI about this target... (e.g. 'Summarize their breaches', 'Find name correlations')" 
+                                                        value={chatInput}
+                                                        onChange={e => setChatInput(e.target.value)}
+                                                        disabled={chatLoading}
+                                                    />
+                                                    <button type="submit" className="btn-primary" style={{ width: 'auto', padding: '0 1.5rem' }} disabled={chatLoading || !chatInput.trim()}>
+                                                        <i data-lucide="send"></i>
+                                                    </button>
+                                                </form>
+                                            </div>
                                         )}
                                     </div>
                                 )}

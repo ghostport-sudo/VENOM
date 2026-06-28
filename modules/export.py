@@ -159,7 +159,7 @@ def export_html(report: Dict[str, Any], path: str) -> None:
     found_social = social.get("found", [])
     if found_social:
         sr_rows = "".join(
-            f"<tr><td>{esc(item.get('platform',''))}</td><td><a href='{esc(item.get('url',''))}' target='_blank'>{esc(item.get('url',''))} ↗</a></td></tr>"
+            f"<tr><td>{esc(item[0] if isinstance(item, (list, tuple)) else item.get('platform',''))}</td><td><a href='{esc(item[1] if isinstance(item, (list, tuple)) else item.get('url',''))}' target='_blank'>{esc(item[1] if isinstance(item, (list, tuple)) else item.get('url',''))} ↗</a></td></tr>"
             for item in found_social
         )
         sections_html.append(f"""

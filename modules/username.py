@@ -3,10 +3,16 @@ Username enumeration and social-profile intelligence.
 Platform sweeps, GitHub/GitLab/npm/PyPI profiles, Keybase identity,
 Twitter oEmbed, Telegram resolve, Steam community, GitHub org membership,
 and commit-email harvesting.
-All queries are rewritten to run asynchronously using aiohttp and BaseOSINTModule.
+
+All queries use proper OSINT methods:
+ - API-based JSON checks where available
+ - HTTP status code checks for platforms that return 404 for missing users
+ - Body-text analysis only for platforms with reliable server-rendered signals
+ - SPA-only / auth-walled platforms are excluded to prevent false positives
 """
 
 import re
+import json
 import urllib.parse
 import asyncio
 from typing import Any, Dict, Optional, List, Tuple, Set
@@ -18,61 +24,176 @@ from modules.config import SOCIAL_PLATFORMS
 # ── Asynchronous OSINT Modules ───────────────────────────────────────────────
 
 class SocialEnumerationModule(BaseOSINTModule):
-    """Sweeps multiple social platforms concurrently with WAF protection."""
-    
+    """Sweeps multiple social platforms concurrently using platform-appropriate detection."""
+
     async def fetch(self, session: aiohttp.ClientSession) -> Any:
         found: List[Tuple[str, str]] = []
         not_found: List[Tuple[str, str]] = []
         errors: List[Tuple[str, str, Any]] = []
-        
-        # Concurrency barrier
-        sem = asyncio.Semaphore(30)
-        
-        async def check_platform(platform: str, url_template: str, not_exist_signals: List[str]):
-            url = url_template.format(self.target)
+
+        # Limit concurrency to avoid rate limiting
+        sem = asyncio.Semaphore(10)
+
+        async def check_platform(platform: str, config: dict):
+            url = config["url"].format(self.target)
+            method = config.get("method", "status_code")
             async with sem:
                 try:
                     headers = {"User-Agent": get_random_user_agent()}
-                    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=8), allow_redirects=True) as r:
-                        body_text = ""
-                        try:
-                            body_text = await r.text()
-                        except Exception:
-                            try:
-                                body_bytes = await r.read()
-                                body_text = body_bytes.decode('utf-8', errors='ignore')
-                            except Exception:
-                                pass
-                        
+                    # Some API endpoints need Accept: application/json
+                    if method == "api_json":
+                        headers["Accept"] = "application/json"
+
+                    timeout = aiohttp.ClientTimeout(total=10)
+                    async with session.get(
+                        url, headers=headers, timeout=timeout,
+                        allow_redirects=False,
+                        ssl=False,
+                    ) as r:
                         status = r.status
-                        
-                        # Cloudflare / WAF protection detection
+
+                        # Handle redirects — many platforms redirect missing
+                        # users to login/home pages (3xx)
+                        if status in (301, 302, 303, 307, 308):
+                            location = r.headers.get("Location", "")
+                            
+                            # A redirect on a social profile lookup almost ALWAYS means
+                            # the user doesn't exist and we were bounced to a login/home page.
+                            # The only exception is a trailing slash redirect.
+                            if location == url + "/" or location == url.replace("http://", "https://"):
+                                # Safe redirect, try one more time
+                                async with session.get(
+                                    location,
+                                    headers=headers, timeout=timeout,
+                                    allow_redirects=False, ssl=False,
+                                ) as r2:
+                                    status = r2.status
+                                    body_text = ""
+                                    try:
+                                        body_text = await r2.text(errors='ignore')
+                                    except Exception:
+                                        pass
+                            else:
+                                not_found.append((platform, url))
+                                return
+                        else:
+                            body_text = ""
+                            try:
+                                body_text = await r.text(errors='ignore')
+                            except Exception:
+                                try:
+                                    raw = await r.read()
+                                    body_text = raw.decode('utf-8', errors='ignore')
+                                except Exception:
+                                    pass
+
+                        # ── WAF / Cloudflare detection ────────────────────
                         if is_waf_blocked(status, body_text):
-                            errors.append((platform, url, "Protected/WAF"))
+                            errors.append((platform, url, "WAF/Protected"))
                             return
 
-                        if status == 200:
-                            body_lower = body_text.lower()
-                            generic = ["user not found", "page not found", "doesn't exist", "no user",
-                                       "account suspended", "not available", "does not exist", "404 not found"]
-                            all_signals = [s.lower() for s in not_exist_signals] + generic
-                            
-                            if any(sig in body_lower for sig in all_signals):
+                        # ── Method: status_code ───────────────────────────
+                        if method == "status_code":
+                            error_codes = config.get("error_codes", [404])
+                            if status in error_codes:
                                 not_found.append((platform, url))
-                            else:
+                            elif status == 200:
                                 found.append((platform, url))
-                        elif status == 404:
-                            not_found.append((platform, url))
-                        else:
-                            errors.append((platform, url, f"Status {status}"))
+                            elif status in (401, 403):
+                                # Forbidden could mean the profile is private (exists)
+                                # or the site is blocking us — mark as error
+                                errors.append((platform, url, f"Status {status}"))
+                            else:
+                                errors.append((platform, url, f"Status {status}"))
+
+                        # ── Method: api_json ──────────────────────────────
+                        elif method == "api_json":
+                            if status == 404:
+                                not_found.append((platform, url))
+                                return
+                            if status != 200:
+                                errors.append((platform, url, f"Status {status}"))
+                                return
+
+                            try:
+                                data = json.loads(body_text)
+                            except (json.JSONDecodeError, ValueError):
+                                errors.append((platform, url, "Invalid JSON"))
+                                return
+
+                            # Custom check function
+                            if "found_check" in config:
+                                if config["found_check"](data):
+                                    found.append((platform, url))
+                                else:
+                                    not_found.append((platform, url))
+                                return
+
+                            # Null check (HackerNews-style)
+                            if config.get("found_if_not_null"):
+                                if data is not None and data != "null":
+                                    found.append((platform, url))
+                                else:
+                                    not_found.append((platform, url))
+                                return
+
+                            # Key/value not-found check (Reddit-style)
+                            nf_key = config.get("not_found_key")
+                            nf_val = config.get("not_found_value")
+                            if nf_key and isinstance(data, dict):
+                                if data.get(nf_key) == nf_val:
+                                    not_found.append((platform, url))
+                                else:
+                                    found.append((platform, url))
+                                return
+
+                            # Fallback: if we got valid JSON and 200, assume found
+                            found.append((platform, url))
+
+                        # ── Method: body_text ─────────────────────────────
+                        elif method == "body_text":
+                            if status == 404:
+                                not_found.append((platform, url))
+                                return
+                            if status != 200:
+                                errors.append((platform, url, f"Status {status}"))
+                                return
+
+                            body_lower = body_text.lower()
+                            found_sigs = [s.lower() for s in config.get("found_signals", [])]
+                            nf_sigs = [s.lower() for s in config.get("not_found_signals", [])]
+                            invert = config.get("invert", False)
+
+                            has_found_sig = any(s in body_lower for s in found_sigs) if found_sigs else False
+                            has_nf_sig = any(s in body_lower for s in nf_sigs) if nf_sigs else False
+
+                            if invert:
+                                # For Telegram: found_signal present = NOT found
+                                if has_found_sig:
+                                    not_found.append((platform, url))
+                                else:
+                                    found.append((platform, url))
+                            else:
+                                if has_nf_sig:
+                                    not_found.append((platform, url))
+                                elif has_found_sig:
+                                    found.append((platform, url))
+                                elif found_sigs:
+                                    # Had signals to look for but none matched
+                                    not_found.append((platform, url))
+                                else:
+                                    errors.append((platform, url, "Inconclusive"))
+
                 except asyncio.TimeoutError:
                     errors.append((platform, url, "timeout"))
+                except aiohttp.ClientConnectorError:
+                    errors.append((platform, url, "connection failed"))
                 except Exception as e:
-                    errors.append((platform, url, str(e)))
+                    errors.append((platform, url, str(e)[:60]))
 
         tasks = [
-            check_platform(platform, tmpl, sigs)
-            for platform, (tmpl, sigs) in SOCIAL_PLATFORMS.items()
+            check_platform(platform, cfg)
+            for platform, cfg in SOCIAL_PLATFORMS.items()
         ]
         await asyncio.gather(*tasks)
         return {"found": found, "not_found": not_found, "errors": errors}
@@ -86,7 +207,7 @@ class GitHubUserModule(BaseOSINTModule):
     async def fetch(self, session: aiohttp.ClientSession) -> Any:
         result = {"found": False, "profile": {}, "repos": [], "gists": []}
         username_encoded = urllib.parse.quote(self.target)
-        
+
         async def get_profile():
             try:
                 url = f"https://api.github.com/users/{username_encoded}"
@@ -172,7 +293,7 @@ class GitHubCommitEmailsModule(BaseOSINTModule):
 
     async def fetch(self, session: aiohttp.ClientSession) -> Any:
         found = set()
-        
+
         async def check_repo_commits(repo_name: str):
             try:
                 url = f"https://api.github.com/repos/{urllib.parse.quote(self.target)}/{urllib.parse.quote(repo_name)}/commits?per_page=5"
@@ -326,6 +447,7 @@ class TelegramResolveModule(BaseOSINTModule):
             res = await self._request(session, "GET", url, timeout=8)
             if isinstance(res, str):
                 body_l = res.lower()
+                # If tg://resolve is NOT in the page, it means profile rendered = exists
                 if self.target.lower() in body_l and "tg://resolve" not in body_l[:500]:
                     out["exists"] = True
                 m = re.search(
